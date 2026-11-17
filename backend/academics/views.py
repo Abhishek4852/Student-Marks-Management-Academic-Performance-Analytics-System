@@ -277,6 +277,19 @@ def subject_students(request, pk):
     serializer = StudentSerializer(students, many=True)
     return Response(serializer.data)
 
+def _validate_mark(value, min_val, max_val, label):
+    if value is None or value == "":
+        return None, None
+    try:
+        val = float(value)
+    except (ValueError, TypeError):
+        return None, f"{label} must be a valid number."
+    if min_val is not None and val < min_val:
+        return None, f"{label} cannot be negative (minimum allowed is {min_val})."
+    if max_val is not None and val > max_val:
+        return None, f"{label} cannot exceed {max_val}."
+    return val, None
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def subject_marks(request, pk):
@@ -296,29 +309,66 @@ def subject_marks(request, pk):
     elif request.method == 'POST':
         marks_data = request.data.get('marks', [])
         updated = 0
+        errors = []
+        validated_entries = []
+
+        for item in marks_data:
+            mark_id = item.get('id')
+            label_prefix = f"Student {item.get('roll_number') or mark_id or ''}".strip()
+            entry_fields = {}
+
+            if subject.subject_type == 'THEORY':
+                theory_fields = [
+                    ('internal_1', 0, 20, 'Internal 1'),
+                    ('internal_2', 0, 20, 'Internal 2'),
+                    ('internal_3', 0, 20, 'Internal 3'),
+                    ('end_semester', 0, 60, 'End Semester'),
+                ]
+                for f_name, min_v, max_v, f_label in theory_fields:
+                    val, err = _validate_mark(item.get(f_name), min_v, max_v, f"{label_prefix} {f_label}".strip())
+                    if err:
+                        errors.append(err)
+                    else:
+                        entry_fields[f_name] = val
+
+            elif subject.subject_type == 'LAB':
+                lab_fields = [
+                    ('lab_test_1', 0, subject.maximum_marks, 'Lab Test 1'),
+                    ('lab_test_2', 0, subject.maximum_marks, 'Lab Test 2'),
+                    ('final_lab_viva', 0, subject.maximum_marks, 'Final Lab Viva'),
+                ]
+                for f_name, min_v, max_v, f_label in lab_fields:
+                    val, err = _validate_mark(item.get(f_name), min_v, max_v, f"{label_prefix} {f_label}".strip())
+                    if err:
+                        errors.append(err)
+                    else:
+                        entry_fields[f_name] = val
+
+            elif subject.subject_type == 'COMPREHENSIVE_VIVA':
+                val, err = _validate_mark(item.get('comprehensive_viva'), 0, subject.maximum_marks, f"{label_prefix} Comprehensive Viva".strip())
+                if err:
+                    errors.append(err)
+                else:
+                    entry_fields['comprehensive_viva'] = val
+
+            validated_entries.append({'id': mark_id, 'fields': entry_fields})
+
+        if errors:
+            return Response({'error': errors[0], 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
-            for item in marks_data:
+            for entry in validated_entries:
                 try:
-                    mark_obj = Marks.objects.get(id=item.get('id'), subject=subject)
+                    mark_obj = Marks.objects.get(id=entry['id'], subject=subject)
                     if mark_obj.is_finalized:
                         continue
-                        
-                    if subject.subject_type == 'THEORY':
-                        mark_obj.internal_1 = item.get('internal_1')
-                        mark_obj.internal_2 = item.get('internal_2')
-                        mark_obj.internal_3 = item.get('internal_3')
-                        mark_obj.end_semester = item.get('end_semester')
-                    elif subject.subject_type == 'LAB':
-                        mark_obj.lab_test_1 = item.get('lab_test_1')
-                        mark_obj.lab_test_2 = item.get('lab_test_2')
-                        mark_obj.final_lab_viva = item.get('final_lab_viva')
-                    elif subject.subject_type == 'COMPREHENSIVE_VIVA':
-                        mark_obj.comprehensive_viva = item.get('comprehensive_viva')
-                        
+                    for field, value in entry['fields'].items():
+                        setattr(mark_obj, field, value)
                     mark_obj.save()
                     updated += 1
                 except Marks.DoesNotExist:
                     pass
+
         return Response({'message': f'Updated {updated} records.'})
 
 @api_view(['GET'])

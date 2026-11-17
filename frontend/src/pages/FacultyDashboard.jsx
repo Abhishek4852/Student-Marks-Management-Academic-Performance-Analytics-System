@@ -9,6 +9,7 @@ export default function FacultyDashboard() {
   const [activeSubject, setActiveSubject] = useState(null);
   const [marks, setMarks] = useState([]);
   const [activeTab, setActiveTab] = useState('marks'); // 'marks' | 'analytics'
+  const [statusMessage, setStatusMessage] = useState(null); // { type: 'success' | 'error', text: string }
 
   useEffect(() => {
     api.get('faculty/my-subjects/').then(res => setSubjects(res.data));
@@ -17,20 +18,90 @@ export default function FacultyDashboard() {
   const loadMarks = async (subject) => {
     setActiveSubject(subject);
     setActiveTab('marks');
+    setStatusMessage(null);
     const res = await api.get(`subjects/${subject.id}/marks/`);
     setMarks(res.data);
+  };
+
+  const isInvalidMark = (val, min = 0, max = null) => {
+    if (val === '' || val === null || val === undefined) return false;
+    const n = Number(val);
+    if (isNaN(n) || n < min) return true;
+    if (max !== null && max !== undefined && n > max) return true;
+    return false;
   };
 
   const handleMarkChange = (id, field, value) => {
     setMarks(marks.map(m => m.id === id ? { ...m, [field]: value } : m));
   };
 
+  const validateAllMarks = () => {
+    if (!activeSubject) return null;
+    for (const m of marks) {
+      const studentLabel = `${m.student_name || 'Student'} (${m.roll_number || m.id})`;
+
+      if (activeSubject.subject_type === 'THEORY') {
+        const theoryChecks = [
+          { key: 'internal_1', label: 'Internal 1', min: 0, max: 20 },
+          { key: 'internal_2', label: 'Internal 2', min: 0, max: 20 },
+          { key: 'internal_3', label: 'Internal 3', min: 0, max: 20 },
+          { key: 'end_semester', label: 'End Semester', min: 0, max: 60 },
+        ];
+        for (const check of theoryChecks) {
+          const val = m[check.key];
+          if (val !== '' && val !== null && val !== undefined) {
+            const num = Number(val);
+            if (isNaN(num)) return `${studentLabel}: ${check.label} must be a number.`;
+            if (num < check.min) return `${studentLabel}: ${check.label} cannot be negative (min: ${check.min}).`;
+            if (num > check.max) return `${studentLabel}: ${check.label} cannot exceed ${check.max}.`;
+          }
+        }
+      } else if (activeSubject.subject_type === 'LAB') {
+        const maxMarks = activeSubject.maximum_marks || 100;
+        const labChecks = [
+          { key: 'lab_test_1', label: 'Lab Test 1' },
+          { key: 'lab_test_2', label: 'Lab Test 2' },
+          { key: 'final_lab_viva', label: 'Final Lab Viva' },
+        ];
+        for (const check of labChecks) {
+          const val = m[check.key];
+          if (val !== '' && val !== null && val !== undefined) {
+            const num = Number(val);
+            if (isNaN(num)) return `${studentLabel}: ${check.label} must be a number.`;
+            if (num < 0) return `${studentLabel}: ${check.label} cannot be negative.`;
+            if (num > maxMarks) return `${studentLabel}: ${check.label} cannot exceed ${maxMarks}.`;
+          }
+        }
+      } else if (activeSubject.subject_type === 'COMPREHENSIVE_VIVA') {
+        const maxMarks = activeSubject.maximum_marks || 100;
+        const val = m.comprehensive_viva;
+        if (val !== '' && val !== null && val !== undefined) {
+          const num = Number(val);
+          if (isNaN(num)) return `${studentLabel}: Comprehensive Viva must be a number.`;
+          if (num < 0) return `${studentLabel}: Comprehensive Viva cannot be negative.`;
+          if (num > maxMarks) return `${studentLabel}: Comprehensive Viva cannot exceed ${maxMarks}.`;
+        }
+      }
+    }
+    return null;
+  };
+
   const saveMarks = async () => {
+    setStatusMessage(null);
+    const validationError = validateAllMarks();
+    if (validationError) {
+      setStatusMessage({ type: 'error', text: validationError });
+      alert(validationError);
+      return;
+    }
+
     try {
       const res = await api.post(`subjects/${activeSubject.id}/marks/`, { marks });
-      alert(res.data.message);
+      setStatusMessage({ type: 'success', text: res.data.message || 'Marks saved successfully.' });
     } catch (err) {
-      alert('Failed to save marks');
+      const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Failed to save marks';
+      setStatusMessage({ type: 'error', text: errorMsg });
+      alert(errorMsg);
     }
   };
 
@@ -103,6 +174,13 @@ export default function FacultyDashboard() {
                 </div>
               </div>
 
+              {statusMessage && (
+                <div className={`mb-4 p-3 rounded font-medium text-sm flex items-center justify-between ${statusMessage.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+                  <span>{statusMessage.text}</span>
+                  <button onClick={() => setStatusMessage(null)} className="text-sm font-bold ml-4 hover:opacity-75">✕</button>
+                </div>
+              )}
+
               {activeTab === 'marks' ? (
                 <div>
                   <div className="overflow-x-auto border rounded max-h-[600px] overflow-y-auto">
@@ -114,23 +192,23 @@ export default function FacultyDashboard() {
                       
                       {activeSubject.subject_type === 'THEORY' && (
                         <>
-                          <th className="p-2 border">Int 1 (20)</th>
-                          <th className="p-2 border">Int 2 (20)</th>
-                          <th className="p-2 border">Int 3 (20)</th>
-                          <th className="p-2 border">End Sem (60)</th>
+                          <th className="p-2 border text-center">Int 1 (0-20)</th>
+                          <th className="p-2 border text-center">Int 2 (0-20)</th>
+                          <th className="p-2 border text-center">Int 3 (0-20)</th>
+                          <th className="p-2 border text-center">End Sem (0-60)</th>
                         </>
                       )}
                       
                       {activeSubject.subject_type === 'LAB' && (
                         <>
-                          <th className="p-2 border">Test 1</th>
-                          <th className="p-2 border">Test 2</th>
-                          <th className="p-2 border">Final Viva</th>
+                          <th className="p-2 border text-center">Test 1</th>
+                          <th className="p-2 border text-center">Test 2</th>
+                          <th className="p-2 border text-center">Final Viva</th>
                         </>
                       )}
                       
                       {activeSubject.subject_type === 'COMPREHENSIVE_VIVA' && (
-                        <th className="p-2 border">Viva Marks</th>
+                        <th className="p-2 border text-center">Viva Marks</th>
                       )}
                     </tr>
                   </thead>
@@ -142,23 +220,107 @@ export default function FacultyDashboard() {
                         
                         {activeSubject.subject_type === 'THEORY' && (
                           <>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.internal_1 || ''} onChange={e=>handleMarkChange(m.id, 'internal_1', e.target.value)} /></td>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.internal_2 || ''} onChange={e=>handleMarkChange(m.id, 'internal_2', e.target.value)} /></td>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.internal_3 || ''} onChange={e=>handleMarkChange(m.id, 'internal_3', e.target.value)} /></td>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.end_semester || ''} onChange={e=>handleMarkChange(m.id, 'end_semester', e.target.value)} /></td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="any"
+                                placeholder="0-20"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.internal_1, 0, 20) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.internal_1 ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'internal_1', e.target.value)}
+                              />
+                            </td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="any"
+                                placeholder="0-20"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.internal_2, 0, 20) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.internal_2 ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'internal_2', e.target.value)}
+                              />
+                            </td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="any"
+                                placeholder="0-20"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.internal_3, 0, 20) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.internal_3 ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'internal_3', e.target.value)}
+                              />
+                            </td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max="60"
+                                step="any"
+                                placeholder="0-60"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.end_semester, 0, 60) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.end_semester ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'end_semester', e.target.value)}
+                              />
+                            </td>
                           </>
                         )}
 
                         {activeSubject.subject_type === 'LAB' && (
                           <>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.lab_test_1 || ''} onChange={e=>handleMarkChange(m.id, 'lab_test_1', e.target.value)} /></td>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.lab_test_2 || ''} onChange={e=>handleMarkChange(m.id, 'lab_test_2', e.target.value)} /></td>
-                            <td className="p-1 border"><input type="number" className="w-16 border p-1" value={m.final_lab_viva || ''} onChange={e=>handleMarkChange(m.id, 'final_lab_viva', e.target.value)} /></td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max={activeSubject.maximum_marks || 100}
+                                step="any"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.lab_test_1, 0, activeSubject.maximum_marks || 100) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.lab_test_1 ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'lab_test_1', e.target.value)}
+                              />
+                            </td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max={activeSubject.maximum_marks || 100}
+                                step="any"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.lab_test_2, 0, activeSubject.maximum_marks || 100) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.lab_test_2 ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'lab_test_2', e.target.value)}
+                              />
+                            </td>
+                            <td className="p-1 border text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max={activeSubject.maximum_marks || 100}
+                                step="any"
+                                className={`w-20 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.final_lab_viva, 0, activeSubject.maximum_marks || 100) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                                value={m.final_lab_viva ?? ''}
+                                onChange={e=>handleMarkChange(m.id, 'final_lab_viva', e.target.value)}
+                              />
+                            </td>
                           </>
                         )}
                         
                         {activeSubject.subject_type === 'COMPREHENSIVE_VIVA' && (
-                          <td className="p-1 border"><input type="number" className="w-20 border p-1" value={m.comprehensive_viva || ''} onChange={e=>handleMarkChange(m.id, 'comprehensive_viva', e.target.value)} /></td>
+                          <td className="p-1 border text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max={activeSubject.maximum_marks || 100}
+                              step="any"
+                              className={`w-24 border rounded p-1 text-center font-mono text-sm focus:outline-none transition ${isInvalidMark(m.comprehensive_viva, 0, activeSubject.maximum_marks || 100) ? 'border-red-500 bg-red-50 text-red-700 ring-1 ring-red-400' : 'border-gray-300 focus:border-blue-500'}`}
+                              value={m.comprehensive_viva ?? ''}
+                              onChange={e=>handleMarkChange(m.id, 'comprehensive_viva', e.target.value)}
+                            />
+                          </td>
                         )}
                       </tr>
                     ))}
