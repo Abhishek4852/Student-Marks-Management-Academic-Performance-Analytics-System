@@ -5,6 +5,8 @@ import api from '../api/axios';
 export default function AnalyticsViewer({ subjectId, subjectName, onClose }) {
   const [data, setData] = useState(null);
   const [filter, setFilter] = useState('overall');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewLimit, setViewLimit] = useState('top10'); // 'top10' | 'top25' | 'all'
 
   useEffect(() => {
     if (subjectId) {
@@ -23,6 +25,57 @@ export default function AnalyticsViewer({ subjectId, subjectName, onClose }) {
     if (key === 'end_semester') return subject_type === 'THEORY' ? 'End Semester' : 'Final Viva';
     if (key === 'overall') return 'Overall Combined';
     return key;
+  };
+
+  // Sort students descending by selected metric
+  const sortedStudents = [...students].sort((a, b) => {
+    const scoreA = Number(a[filter] ?? 0);
+    const scoreB = Number(b[filter] ?? 0);
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return (a.roll_number || '').localeCompare(b.roll_number || '');
+  });
+
+  // Assign ranks (handling ties properly)
+  let currentRank = 1;
+  const rankedStudents = sortedStudents.map((s, idx) => {
+    if (idx > 0) {
+      const prevScore = Number(sortedStudents[idx - 1][filter] ?? 0);
+      const currScore = Number(s[filter] ?? 0);
+      if (currScore !== prevScore) {
+        currentRank = idx + 1;
+      }
+    }
+    return { ...s, rank: currentRank };
+  });
+
+  // Filter by search query
+  const filteredStudents = rankedStudents.filter(s => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    return (s.student_name && s.student_name.toLowerCase().includes(term)) ||
+           (s.roll_number && s.roll_number.toLowerCase().includes(term));
+  });
+
+  // Sliced according to view limit
+  const displayedStudents = viewLimit === 'all'
+    ? filteredStudents
+    : viewLimit === 'top25'
+      ? filteredStudents.slice(0, 25)
+      : filteredStudents.slice(0, 10);
+
+  const getPerformanceBadge = (score) => {
+    const num = Number(score ?? 0);
+    if (num >= 80) return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Distinction (80%+)</span>;
+    if (num >= 60) return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">First Class (60-79%)</span>;
+    if (num >= 40) return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Pass (40-59%)</span>;
+    return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">Needs Attention (&lt;40%)</span>;
+  };
+
+  const getRankBadge = (rank) => {
+    if (rank === 1) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-800 font-bold text-xs border border-amber-300 shadow-sm">🥇 1</span>;
+    if (rank === 2) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-100 text-slate-800 font-bold text-xs border border-slate-300 shadow-sm">🥈 2</span>;
+    if (rank === 3) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-orange-100 text-orange-800 font-bold text-xs border border-orange-300 shadow-sm">🥉 3</span>;
+    return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-gray-700 font-semibold text-xs border border-gray-200">#{rank}</span>;
   };
 
   return (
@@ -56,7 +109,7 @@ export default function AnalyticsViewer({ subjectId, subjectName, onClose }) {
         </div>
       </div>
 
-      <div className="h-[400px] w-full">
+      <div className="h-[400px] w-full mb-8">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={students} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -67,6 +120,125 @@ export default function AnalyticsViewer({ subjectId, subjectName, onClose }) {
             <Bar dataKey={filter} name={getMetricLabel(filter) + ' (%)'} fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Leaderboard Section */}
+      <div className="pt-6 border-t border-gray-200">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              🏆 Student Leaderboard & Performance Ranking
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Ranked by <strong>{getMetricLabel(filter)}</strong> ({filter === 'overall' ? 'Combined Score' : 'Normalized to 100%'})
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="text"
+              placeholder="Search name or roll no..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
+            />
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold">
+              <button
+                onClick={() => setViewLimit('top10')}
+                className={`px-3 py-1.5 transition ${viewLimit === 'top10' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              >
+                Top 10
+              </button>
+              <button
+                onClick={() => setViewLimit('top25')}
+                className={`px-3 py-1.5 border-l border-r border-gray-300 transition ${viewLimit === 'top25' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              >
+                Top 25
+              </button>
+              <button
+                onClick={() => setViewLimit('all')}
+                className={`px-3 py-1.5 transition ${viewLimit === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              >
+                All ({students.length})
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Top 3 Podium Cards */}
+        {rankedStudents.length >= 3 && !searchTerm && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* 2nd Place */}
+            <div className="bg-gradient-to-b from-slate-50 to-gray-100 border border-slate-300 rounded-xl p-4 text-center shadow-sm order-2 md:order-1">
+              <div className="text-3xl mb-1">🥈</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-600">2nd Place</div>
+              <div className="font-bold text-base text-gray-800 mt-1 truncate" title={rankedStudents[1].student_name}>
+                {rankedStudents[1].student_name}
+              </div>
+              <div className="text-xs font-mono text-gray-500">{rankedStudents[1].roll_number}</div>
+              <div className="mt-2 text-2xl font-extrabold text-slate-700">{rankedStudents[1][filter] ?? 0}%</div>
+            </div>
+
+            {/* 1st Place */}
+            <div className="bg-gradient-to-b from-amber-50 to-yellow-100 border-2 border-amber-400 rounded-xl p-4 text-center shadow-md transform md:-translate-y-2 order-1 md:order-2">
+              <div className="text-3xl mb-1">👑 🥇</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-700">Class Topper</div>
+              <div className="font-bold text-lg text-gray-900 mt-1 truncate" title={rankedStudents[0].student_name}>
+                {rankedStudents[0].student_name}
+              </div>
+              <div className="text-xs font-mono text-gray-600">{rankedStudents[0].roll_number}</div>
+              <div className="mt-2 text-3xl font-black text-amber-800">{rankedStudents[0][filter] ?? 0}%</div>
+            </div>
+
+            {/* 3rd Place */}
+            <div className="bg-gradient-to-b from-orange-50 to-amber-100 border border-orange-300 rounded-xl p-4 text-center shadow-sm order-3">
+              <div className="text-3xl mb-1">🥉</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-orange-700">3rd Place</div>
+              <div className="font-bold text-base text-gray-800 mt-1 truncate" title={rankedStudents[2].student_name}>
+                {rankedStudents[2].student_name}
+              </div>
+              <div className="text-xs font-mono text-gray-500">{rankedStudents[2].roll_number}</div>
+              <div className="mt-2 text-2xl font-extrabold text-orange-800">{rankedStudents[2][filter] ?? 0}%</div>
+            </div>
+          </div>
+        )}
+
+        {/* Leaderboard Table */}
+        <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm max-h-[450px] overflow-y-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead className="bg-gray-100 sticky top-0 shadow-sm text-gray-700 font-semibold">
+              <tr>
+                <th className="p-3 w-16 text-center">Rank</th>
+                <th className="p-3 w-36">Roll Number</th>
+                <th className="p-3">Student Name</th>
+                <th className="p-3 w-32 text-center">{getMetricLabel(filter)}</th>
+                <th className="p-3 w-44 text-center">Performance Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {displayedStudents.map(s => (
+                <tr key={s.roll_number} className="hover:bg-blue-50/50 transition">
+                  <td className="p-3 text-center">{getRankBadge(s.rank)}</td>
+                  <td className="p-3 font-mono font-medium text-gray-800">{s.roll_number}</td>
+                  <td className="p-3 font-medium text-gray-900">{s.student_name}</td>
+                  <td className="p-3 text-center font-bold text-blue-700 font-mono">
+                    {s[filter] !== null && s[filter] !== undefined ? `${s[filter]}%` : 'N/A'}
+                  </td>
+                  <td className="p-3 text-center">
+                    {getPerformanceBadge(s[filter])}
+                  </td>
+                </tr>
+              ))}
+              {displayedStudents.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="p-6 text-center text-gray-500 font-medium">
+                    No students match your search criteria.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
