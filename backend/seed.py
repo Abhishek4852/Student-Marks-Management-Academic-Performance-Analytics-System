@@ -12,7 +12,7 @@ if not User.objects.filter(username='admin').exists():
     print("Admin user created (admin / admin123)")
 
 programs = [
-    ('BCE + MCA', 'BCE_MCA'),
+    ('BCA + MCA', 'BCA_MCA'),
     ('B.Tech + M.Tech', 'BTECH_MTECH'),
     ('B.Com + M.Com', 'BCOM_MCOM'),
     ('BBA + MBA', 'BBA_MBA'),

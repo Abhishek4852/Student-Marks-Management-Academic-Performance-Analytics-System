@@ -32,6 +32,17 @@ export default function AdminDashboard() {
     ? `${selectedProgramObj.name} ${startYear}-${endYear}`
     : '';
 
+  const isDuplicateBatch = Boolean(
+    selectedProgram &&
+    startYear &&
+    endYear &&
+    batches.some(b => 
+      String(b.degree_program) === String(selectedProgram) &&
+      Number(b.start_year) === Number(startYear) &&
+      Number(b.end_year) === Number(endYear)
+    )
+  );
+
   const handleStartYearChange = (year) => {
     setStartYear(year);
     setBatchError('');
@@ -84,6 +95,13 @@ export default function AdminDashboard() {
     const duration = eYear - sYear;
     if (duration < 2 || duration > 6) {
       setBatchError('Course duration must be between 2 and 6 years only.');
+      return;
+    }
+
+    if (isDuplicateBatch) {
+      const errMsg = `A batch for "${selectedProgramObj?.name}" with duration ${sYear}-${eYear} already exists. You cannot create the same batch twice.`;
+      setBatchError(errMsg);
+      alert(errMsg);
       return;
     }
 
@@ -211,14 +229,20 @@ export default function AdminDashboard() {
           {/* Create Batch Button */}
           <button
             onClick={createBatch}
-            disabled={!selectedProgram || !startYear || !endYear}
+            disabled={!selectedProgram || !startYear || !endYear || isDuplicateBatch}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium px-5 py-2 rounded h-[42px] transition shadow-sm"
           >
             Create Batch
           </button>
         </div>
 
-        {batchError && (
+        {isDuplicateBatch && (
+          <div className="mt-3 text-sm text-amber-700 font-medium bg-amber-50 p-2.5 rounded border border-amber-200">
+            ⚠️ A batch for <strong>{selectedProgramObj?.name}</strong> with duration <strong>{startYear}-{endYear}</strong> already exists. Duplicate batches for the same course and duration cannot be created.
+          </div>
+        )}
+
+        {batchError && !isDuplicateBatch && (
           <div className="mt-3 text-sm text-red-600 font-medium bg-red-50 p-2 rounded border border-red-200">
             ⚠️ {batchError}
           </div>
@@ -247,8 +271,6 @@ function BatchManager({ activeBatch, faculties }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState([]);
   const [semesters, setSemesters] = useState([]);
-  const [semesterName, setSemesterName] = useState('');
-  const [semesterNum, setSemesterNum] = useState(1);
   const [activeSemester, setActiveSemester] = useState(null);
   
   // Student manual management state
@@ -257,7 +279,19 @@ function BatchManager({ activeBatch, faculties }) {
   const [editingStudent, setEditingStudent] = useState(null);
 
   useEffect(() => {
-    api.get(`semesters/?batch_id=${activeBatch.id}`).then(res => setSemesters(res.data));
+    api.get(`semesters/?batch_id=${activeBatch.id}`).then(res => {
+      setSemesters(res.data);
+      if (res.data && res.data.length > 0) {
+        setActiveSemester(prev => {
+          if (prev && res.data.some(s => s.id === prev.id)) {
+            return res.data.find(s => s.id === prev.id);
+          }
+          return res.data[0];
+        });
+      } else {
+        setActiveSemester(null);
+      }
+    });
     fetchStudents();
   }, [activeBatch]);
 
@@ -290,33 +324,104 @@ function BatchManager({ activeBatch, faculties }) {
     }
   };
 
-  const createSemester = async () => {
-    const res = await api.post('semesters/', {
-      batch: activeBatch.id,
-      semester_number: semesterNum,
-      name: semesterName
-    });
-    setSemesters([...semesters, res.data]);
-    alert('Semester Created!');
+  const validateStudentInputs = (name, roll, enroll) => {
+    const trimmedName = (name || '').trim();
+    const trimmedRoll = (roll || '').trim().toUpperCase();
+    const trimmedEnroll = (enroll || '').trim().toUpperCase();
+
+    // 1. Name validation: letters, spaces, dots, apostrophes only
+    const nameRegex = /^[A-Za-z\s.']+$/;
+    if (!trimmedName || trimmedName.length < 2) {
+      return "Student name must be at least 2 characters long.";
+    }
+    if (!nameRegex.test(trimmedName)) {
+      return "Student name must contain only letters and spaces (no numbers or special characters).";
+    }
+
+    // 2. Roll number validation: format like IC-2K22-107
+    const rollRegex = /^[A-Za-z]{2,4}-(?:2K\d{2}|20\d{2})-\d{1,4}$/i;
+    if (!trimmedRoll) {
+      return "Roll number is required.";
+    }
+    if (!rollRegex.test(trimmedRoll)) {
+      return "Invalid roll number format. Roll number must match format like IC-2K22-107 (e.g. IC-2K22-05).";
+    }
+
+    // 3. Enrollment number validation: format like DX2201125
+    const enrollRegex = /^(?:[A-Za-z]{2,3}\d{5,8}|EN-[A-Za-z0-9-]+)$/i;
+    if (!trimmedEnroll) {
+      return "Enrollment number is required.";
+    }
+    if (!enrollRegex.test(trimmedEnroll)) {
+      return "Invalid enrollment number format. Enrollment number must match format like DX2201125 (2-3 letters followed by 5-8 digits).";
+    }
+
+    return null;
   };
 
   const addStudent = async () => {
+    const error = validateStudentInputs(
+      newStudent.student_name,
+      newStudent.roll_number,
+      newStudent.enrollment_number
+    );
+    if (error) {
+      alert(error);
+      return;
+    }
+
+    const payload = {
+      student_name: newStudent.student_name.trim(),
+      roll_number: newStudent.roll_number.trim().toUpperCase(),
+      enrollment_number: newStudent.enrollment_number.trim().toUpperCase(),
+      batch: activeBatch.id
+    };
+
     try {
-      await api.post('students/', { ...newStudent, batch: activeBatch.id });
+      await api.post('students/', payload);
       setNewStudent({ student_name: '', roll_number: '', enrollment_number: '' });
       fetchStudents();
+      alert("Student added successfully!");
     } catch (e) {
-      alert("Failed to add student. Ensure roll/enrollment numbers are unique.");
+      const errorMsg = e.response?.data
+        ? (typeof e.response.data === 'string'
+            ? e.response.data
+            : Object.entries(e.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | '))
+        : "Failed to add student. Ensure roll/enrollment numbers are unique.";
+      alert(errorMsg);
     }
   };
 
   const updateStudent = async () => {
+    const error = validateStudentInputs(
+      editingStudent.student_name,
+      editingStudent.roll_number,
+      editingStudent.enrollment_number || 'EN-DEFAULT'
+    );
+    if (error && !error.includes("Enrollment number")) {
+      alert(error);
+      return;
+    }
+
+    const payload = {
+      ...editingStudent,
+      student_name: editingStudent.student_name.trim(),
+      roll_number: editingStudent.roll_number.trim().toUpperCase(),
+      enrollment_number: (editingStudent.enrollment_number || '').trim().toUpperCase()
+    };
+
     try {
-      await api.patch(`students/${editingStudent.id}/`, editingStudent);
+      await api.patch(`students/${editingStudent.id}/`, payload);
       setEditingStudent(null);
       fetchStudents();
+      alert("Student updated successfully!");
     } catch (e) {
-      alert("Failed to update student.");
+      const errorMsg = e.response?.data
+        ? (typeof e.response.data === 'string'
+            ? e.response.data
+            : Object.entries(e.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | '))
+        : "Failed to update student.";
+      alert(errorMsg);
     }
   };
 
@@ -338,34 +443,63 @@ function BatchManager({ activeBatch, faculties }) {
       <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div>
           <h3 className="text-lg font-bold mb-3 border-b pb-2">Batch Students Management</h3>
-          <div className="flex gap-2 mb-4">
-            <input className="border p-2 w-1/3 text-sm" placeholder="Name" value={newStudent.student_name} onChange={e=>setNewStudent({...newStudent, student_name: e.target.value})} />
-            <input className="border p-2 w-1/3 text-sm" placeholder="Roll No" value={newStudent.roll_number} onChange={e=>setNewStudent({...newStudent, roll_number: e.target.value})} />
-            <input className="border p-2 w-1/3 text-sm" placeholder="Enrollment No" value={newStudent.enrollment_number} onChange={e=>setNewStudent({...newStudent, enrollment_number: e.target.value})} />
-            <button onClick={addStudent} className="bg-blue-600 text-white px-3 py-2 rounded text-sm font-bold">Add</button>
+          <div className="flex flex-col gap-1 mb-4">
+            <div className="flex gap-2">
+              <input
+                className="border p-2 w-1/3 text-sm rounded focus:ring-1 focus:ring-blue-500"
+                placeholder="Name (e.g. Rahul Sharma)"
+                value={newStudent.student_name}
+                onChange={e=>setNewStudent({...newStudent, student_name: e.target.value})}
+              />
+              <input
+                className="border p-2 w-1/3 text-sm rounded focus:ring-1 focus:ring-blue-500"
+                placeholder="Roll No (e.g. IC-2K22-107)"
+                value={newStudent.roll_number}
+                onChange={e=>setNewStudent({...newStudent, roll_number: e.target.value})}
+              />
+              <input
+                className="border p-2 w-1/3 text-sm rounded focus:ring-1 focus:ring-blue-500"
+                placeholder="Enroll No (e.g. DX2201125)"
+                value={newStudent.enrollment_number}
+                onChange={e=>setNewStudent({...newStudent, enrollment_number: e.target.value})}
+              />
+              <button onClick={addStudent} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold transition">
+                Add
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500">
+              Format: Name (letters only) | Roll No: IC-2K22-107 (e.g. IC-2K22-05) | Enrollment No: DX2201125 (e.g. DX2201130)
+            </p>
           </div>
           
           <div className="max-h-60 overflow-y-auto border rounded">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-100 sticky top-0">
-                <tr><th className="p-2 border">Name</th><th className="p-2 border">Roll</th><th className="p-2 border">Actions</th></tr>
+                <tr>
+                  <th className="p-2 border">Name</th>
+                  <th className="p-2 border">Roll No</th>
+                  <th className="p-2 border">Enrollment No</th>
+                  <th className="p-2 border">Actions</th>
+                </tr>
               </thead>
               <tbody>
                 {students.map(s => (
                   <tr key={s.id} className="hover:bg-gray-50 border-b">
                     {editingStudent?.id === s.id ? (
                       <>
-                        <td className="p-1"><input className="border p-1 w-full" value={editingStudent.student_name} onChange={e=>setEditingStudent({...editingStudent, student_name: e.target.value})} /></td>
-                        <td className="p-1"><input className="border p-1 w-full" value={editingStudent.roll_number} onChange={e=>setEditingStudent({...editingStudent, roll_number: e.target.value})} /></td>
+                        <td className="p-1"><input className="border p-1 w-full text-xs" value={editingStudent.student_name} onChange={e=>setEditingStudent({...editingStudent, student_name: e.target.value})} /></td>
+                        <td className="p-1"><input className="border p-1 w-full text-xs" value={editingStudent.roll_number} onChange={e=>setEditingStudent({...editingStudent, roll_number: e.target.value})} /></td>
+                        <td className="p-1"><input className="border p-1 w-full text-xs" value={editingStudent.enrollment_number} onChange={e=>setEditingStudent({...editingStudent, enrollment_number: e.target.value})} /></td>
                         <td className="p-1 flex gap-1">
-                          <button onClick={updateStudent} className="bg-green-500 text-white px-2 py-1 rounded text-xs">Save</button>
-                          <button onClick={()=>setEditingStudent(null)} className="bg-gray-400 text-white px-2 py-1 rounded text-xs">Cancel</button>
+                          <button onClick={updateStudent} className="bg-green-500 text-white px-2 py-1 rounded text-xs font-semibold">Save</button>
+                          <button onClick={()=>setEditingStudent(null)} className="bg-gray-400 text-white px-2 py-1 rounded text-xs font-semibold">Cancel</button>
                         </td>
                       </>
                     ) : (
                       <>
                         <td className="p-2">{s.student_name}</td>
-                        <td className="p-2">{s.roll_number}</td>
+                        <td className="p-2 font-mono text-xs">{s.roll_number}</td>
+                        <td className="p-2 font-mono text-xs text-gray-600">{s.enrollment_number}</td>
                         <td className="p-2 flex gap-2">
                           <button onClick={()=>setEditingStudent(s)} className="text-blue-600 hover:underline">Edit</button>
                           <button onClick={()=>deleteStudent(s.id)} className="text-red-600 hover:underline">Del</button>
@@ -374,7 +508,7 @@ function BatchManager({ activeBatch, faculties }) {
                     )}
                   </tr>
                 ))}
-                {students.length === 0 && <tr><td colSpan="3" className="p-4 text-center text-gray-500">No students found.</td></tr>}
+                {students.length === 0 && <tr><td colSpan="4" className="p-4 text-center text-gray-500">No students found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -396,28 +530,44 @@ function BatchManager({ activeBatch, faculties }) {
       </div>
 
       <div className="mb-8 border-t pt-6">
-        <h3 className="text-xl font-bold mb-4">Create Semester</h3>
-        <div className="flex flex-wrap gap-4 items-center">
-          <input className="border border-gray-300 p-2 rounded w-32" type="number" placeholder="Sem Num (e.g. 1)" value={semesterNum} onChange={e=>setSemesterNum(e.target.value)} />
-          <input className="border border-gray-300 p-2 rounded w-64" placeholder="Semester Name (e.g. Semester 1)" value={semesterName} onChange={e=>setSemesterName(e.target.value)} />
-          <button onClick={createSemester} className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded font-bold">Create Semester</button>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Select Semester</h3>
+            <p className="text-xs text-gray-500">
+              Semesters are automatically created based on course duration ({activeBatch.start_year && activeBatch.end_year ? `${activeBatch.end_year - activeBatch.start_year} Years / ${semesters.length} Semesters` : `${semesters.length} Semesters`}). Click a semester below to manage its subjects and assign faculty.
+            </p>
+          </div>
+          <span className="text-xs bg-purple-100 text-purple-800 font-semibold px-3 py-1 rounded-full">
+            Total Semesters: {semesters.length}
+          </span>
         </div>
         
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 mt-4">
           {semesters.map(s => (
-            <button key={s.id} onClick={() => setActiveSemester(s)} className={`px-4 py-2 rounded font-bold shadow-sm ${activeSemester?.id === s.id ? 'bg-purple-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'}`}>
+            <button
+              key={s.id}
+              onClick={() => setActiveSemester(s)}
+              className={`px-4 py-2 rounded font-bold transition shadow-sm ${
+                activeSemester?.id === s.id
+                  ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+              }`}
+            >
               {s.name}
             </button>
           ))}
+          {semesters.length === 0 && (
+            <p className="text-sm text-gray-500 italic">No semesters generated yet.</p>
+          )}
         </div>
       </div>
 
-      {activeSemester && <SemesterManager activeSemester={activeSemester} batchId={activeBatch.id} faculties={faculties} />}
+      {activeSemester && <SemesterManager activeSemester={activeSemester} faculties={faculties} />}
     </div>
   );
 }
 
-function SemesterManager({ activeSemester, batchId, faculties }) {
+function SemesterManager({ activeSemester, faculties }) {
   const [subjects, setSubjects] = useState([]);
   
   const [subName, setSubName] = useState('');
@@ -434,15 +584,48 @@ function SemesterManager({ activeSemester, batchId, faculties }) {
   }, [activeSemester]);
 
   const createSubject = async () => {
-    const res = await api.post('subjects/', {
-      semester: activeSemester.id,
-      name: subName,
-      subject_code: subCode,
-      subject_type: subType,
-      assigned_faculty: assignedFac || null
-    });
-    setSubjects([...subjects, res.data]);
-    setSubName(''); setSubCode('');
+    if (!subName.trim() || !subCode.trim()) {
+      alert('Please enter both Subject Name and Subject Code.');
+      return;
+    }
+    try {
+      const res = await api.post('subjects/', {
+        semester: activeSemester.id,
+        name: subName.trim(),
+        subject_code: subCode.trim(),
+        subject_type: subType,
+        assigned_faculty: assignedFac || null
+      });
+      setSubjects([...subjects, res.data]);
+      setSubName('');
+      setSubCode('');
+      setAssignedFac('');
+      alert('Subject added successfully!');
+    } catch (e) {
+      alert('Failed to add subject.');
+    }
+  };
+
+  const updateSubjectFaculty = async (subjectId, facultyId) => {
+    try {
+      const res = await api.patch(`subjects/${subjectId}/`, {
+        assigned_faculty: facultyId || null
+      });
+      setSubjects(subjects.map(s => s.id === subjectId ? res.data : s));
+    } catch (e) {
+      alert('Failed to update faculty assignment.');
+    }
+  };
+
+  const deleteSubject = async (subjectId) => {
+    if (window.confirm("Are you sure you want to delete this subject?")) {
+      try {
+        await api.delete(`subjects/${subjectId}/`);
+        setSubjects(subjects.filter(s => s.id !== subjectId));
+      } catch (e) {
+        alert("Failed to delete subject.");
+      }
+    }
   };
 
   const enrollAll = async () => {
@@ -469,38 +652,62 @@ function SemesterManager({ activeSemester, batchId, faculties }) {
   return (
     <div className="bg-purple-50 p-6 rounded shadow border border-purple-200 mt-6">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-bold text-purple-900">Manage Semester: {activeSemester.name}</h3>
-        <button onClick={loadRankings} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded shadow">View Semester Rankings</button>
+        <div>
+          <h3 className="text-xl font-bold text-purple-900">Manage Semester: {activeSemester.name}</h3>
+          <p className="text-xs text-purple-700">Add subjects, assign faculty, or view performance analytics for this semester.</p>
+        </div>
+        <button onClick={loadRankings} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded shadow text-sm">View Semester Rankings</button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
-        <input className="border p-2 rounded" placeholder="Subject Name" value={subName} onChange={e=>setSubName(e.target.value)} />
-        <input className="border p-2 rounded" placeholder="Sub Code" value={subCode} onChange={e=>setSubCode(e.target.value)} />
-        <select className="border p-2 rounded bg-white" value={subType} onChange={e=>setSubType(e.target.value)}>
-          <option value="THEORY">Theory</option>
-          <option value="LAB">Lab</option>
-          <option value="COMPREHENSIVE_VIVA">Viva</option>
-        </select>
-        <select className="border p-2 rounded bg-white" value={assignedFac} onChange={e=>setAssignedFac(e.target.value)}>
-          <option value="">-- Assign Faculty --</option>
-          {approvedFaculties.map(f => <option key={f.id} value={f.id}>{f.username}</option>)}
-        </select>
-        <button onClick={createSubject} className="bg-green-600 hover:bg-green-700 text-white rounded font-bold">Add Subject</button>
+      {/* Add New Subject */}
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-purple-100 mb-6">
+        <h4 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Add New Subject</h4>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <input className="border border-gray-300 p-2 rounded text-sm" placeholder="Subject Name (e.g. OOAD)" value={subName} onChange={e=>setSubName(e.target.value)} />
+          <input className="border border-gray-300 p-2 rounded text-sm" placeholder="Sub Code (e.g. CS101)" value={subCode} onChange={e=>setSubCode(e.target.value)} />
+          <select className="border border-gray-300 p-2 rounded bg-white text-sm" value={subType} onChange={e=>setSubType(e.target.value)}>
+            <option value="THEORY">Theory</option>
+            <option value="LAB">Lab</option>
+            <option value="COMPREHENSIVE_VIVA">Viva</option>
+          </select>
+          <select className="border border-gray-300 p-2 rounded bg-white text-sm" value={assignedFac} onChange={e=>setAssignedFac(e.target.value)}>
+            <option value="">-- Assign Faculty --</option>
+            {approvedFaculties.map(f => <option key={f.id} value={f.id}>{f.username}</option>)}
+          </select>
+          <button onClick={createSubject} className="bg-green-600 hover:bg-green-700 text-white rounded font-bold text-sm transition">Add Subject</button>
+        </div>
       </div>
 
-      <div className="mb-6 bg-white p-4 rounded border">
-        <h4 className="font-bold text-gray-700 mb-3">Subjects List ({subjects.length}):</h4>
-        {subjects.length === 0 ? <p className="text-gray-500 text-sm">No subjects yet.</p> : (
+      {/* Subjects List */}
+      <div className="mb-6 bg-white p-4 rounded-lg border border-purple-100">
+        <h4 className="font-bold text-gray-700 mb-3">Subjects in {activeSemester.name} ({subjects.length}):</h4>
+        {subjects.length === 0 ? <p className="text-gray-500 text-sm italic">No subjects added yet to this semester.</p> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {subjects.map(s => (
-              <div key={s.id} className="border p-3 rounded flex justify-between items-center shadow-sm">
-                <div>
-                  <div className="font-bold text-gray-800">{s.subject_code} - {s.name}</div>
-                  <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded inline-block mt-1">{s.subject_type}</div>
+              <div key={s.id} className="border border-gray-200 p-3 rounded-lg flex flex-col justify-between shadow-sm hover:border-purple-300 transition bg-white gap-2">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-gray-800 text-sm">{s.subject_code} - {s.name}</div>
+                    <span className="text-[11px] text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded inline-block mt-1 font-medium">{s.subject_type}</span>
+                  </div>
+                  <button onClick={() => deleteSubject(s.id)} className="text-red-500 hover:text-red-700 text-xs font-semibold px-2 py-1 hover:bg-red-50 rounded">Delete</button>
                 </div>
-                <div className="flex gap-2 items-center text-sm text-gray-600">
-                  <span>Teacher ID: {s.assigned_faculty || 'None'}</span>
-                  <button onClick={() => setAnalyticsSubject(s)} className="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded font-bold shadow-sm ml-2">Analytics</button>
+                
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-600">Faculty:</span>
+                    <select
+                      className="border border-gray-300 rounded px-1.5 py-1 text-xs bg-white text-gray-800 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      value={s.assigned_faculty || ''}
+                      onChange={e => updateSubjectFaculty(s.id, e.target.value)}
+                    >
+                      <option value="">-- Unassigned --</option>
+                      {approvedFaculties.map(f => (
+                        <option key={f.id} value={f.id}>{f.username}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={() => setAnalyticsSubject(s)} className="bg-blue-100 text-blue-700 hover:bg-blue-200 px-2.5 py-1 rounded font-bold shadow-sm">Analytics</button>
                 </div>
               </div>
             ))}

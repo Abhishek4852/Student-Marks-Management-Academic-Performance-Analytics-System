@@ -1,3 +1,4 @@
+import re
 from rest_framework import serializers
 from .models import DegreeProgram, Batch, Student, Semester, Subject, Enrollment, Marks, AuditLog
 
@@ -27,6 +28,20 @@ class BatchSerializer(serializers.ModelSerializer):
             if duration < 2 or duration > 6:
                 raise serializers.ValidationError({"end_year": "Course duration must be between 2 years to 6 years only."})
 
+        # Check duplicate batch: same course and same duration (start_year and end_year)
+        if degree_program and start_year and end_year:
+            existing = Batch.objects.filter(
+                degree_program=degree_program,
+                start_year=start_year,
+                end_year=end_year
+            )
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError({
+                    "batch": f"A batch for '{degree_program.name}' with duration {start_year}-{end_year} already exists."
+                })
+
         # Ensure consistent batch naming format: <Course Name> <start_year>-<end_year>
         if degree_program and start_year and end_year:
             attrs['name'] = f"{degree_program.name} {start_year}-{end_year}"
@@ -35,9 +50,30 @@ class BatchSerializer(serializers.ModelSerializer):
 
 class StudentSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source='batch.name', read_only=True)
+
     class Meta:
         model = Student
         fields = '__all__'
+
+    def validate_student_name(self, value):
+        name = value.strip()
+        if len(name) < 2:
+            raise serializers.ValidationError("Student name must be at least 2 characters long.")
+        if not re.match(r"^[A-Za-z\s.']+$", name):
+            raise serializers.ValidationError("Student name must contain only letters and spaces (no numbers or symbols).")
+        return name
+
+    def validate_roll_number(self, value):
+        roll = value.strip().upper()
+        if not re.match(r"^[A-Za-z]{2,4}-(?:2K\d{2}|20\d{2})-\d{1,4}$", roll):
+            raise serializers.ValidationError("Invalid roll number format. Roll number must be in format like IC-2K22-107.")
+        return roll
+
+    def validate_enrollment_number(self, value):
+        enroll = value.strip().upper()
+        if not re.match(r"^(?:[A-Za-z]{2,3}\d{5,8}|EN-[A-Za-z0-9-]+)$", enroll):
+            raise serializers.ValidationError("Invalid enrollment number format. Enrollment number must be in format like DX2201125.")
+        return enroll
 
 class SemesterSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source='batch.name', read_only=True)

@@ -7,6 +7,7 @@ from .serializers import (DegreeProgramSerializer, BatchSerializer, StudentSeria
                           SemesterSerializer, SubjectSerializer, EnrollmentSerializer, MarksSerializer)
 from django.contrib.auth import get_user_model
 from django.db import transaction
+import re
 import openpyxl
 
 User = get_user_model()
@@ -39,7 +40,16 @@ def batch_list(request):
             return Response(status=status.HTTP_403_FORBIDDEN)
         serializer = BatchSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            batch = serializer.save()
+            if batch.start_year and batch.end_year:
+                duration = batch.end_year - batch.start_year
+                total_semesters = duration * 2
+                for i in range(1, total_semesters + 1):
+                    Semester.objects.get_or_create(
+                        batch=batch,
+                        semester_number=i,
+                        defaults={'name': f"Semester {i}"}
+                    )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -136,9 +146,20 @@ def student_import_confirm(request):
     
     with transaction.atomic():
         for item in students_data:
-            roll = item.get('roll_number')
-            enroll = item.get('enrollment_number')
+            name = (item.get('student_name') or '').strip()
+            roll = (item.get('roll_number') or '').strip().upper()
+            enroll = (item.get('enrollment_number') or '').strip().upper()
             
+            if not name or len(name) < 2 or not re.match(r"^[A-Za-z\s.']+$", name):
+                errors.append(f"Invalid student name '{name}'. Must contain only letters and spaces.")
+                continue
+            if not roll or not re.match(r"^[A-Za-z]{2,4}-(?:2K\d{2}|20\d{2})-\d{1,4}$", roll):
+                errors.append(f"Invalid roll number '{roll}'. Must be in format like IC-2K22-107.")
+                continue
+            if not enroll or not re.match(r"^(?:[A-Za-z]{2,3}\d{5,8}|EN-[A-Za-z0-9-]+)$", enroll):
+                errors.append(f"Invalid enrollment number '{enroll}'. Must be in format like DX2201125.")
+                continue
+
             if Student.objects.filter(roll_number=roll).exists():
                 errors.append(f"Roll number {roll} already exists.")
                 continue
@@ -147,7 +168,7 @@ def student_import_confirm(request):
                 continue
                 
             Student.objects.create(
-                student_name=item.get('student_name'),
+                student_name=name,
                 roll_number=roll,
                 enrollment_number=enroll,
                 batch=batch
@@ -165,9 +186,20 @@ def semester_list(request):
     if request.method == 'GET':
         batch_id = request.query_params.get('batch_id')
         if batch_id:
-            semesters = Semester.objects.filter(batch_id=batch_id)
+            batch = Batch.objects.filter(id=batch_id).first()
+            if batch and batch.start_year and batch.end_year:
+                duration = batch.end_year - batch.start_year
+                total_semesters = duration * 2
+                if Semester.objects.filter(batch=batch).count() == 0:
+                    for i in range(1, total_semesters + 1):
+                        Semester.objects.get_or_create(
+                            batch=batch,
+                            semester_number=i,
+                            defaults={'name': f"Semester {i}"}
+                        )
+            semesters = Semester.objects.filter(batch_id=batch_id).order_by('semester_number')
         else:
-            semesters = Semester.objects.all()
+            semesters = Semester.objects.all().order_by('semester_number')
         serializer = SemesterSerializer(semesters, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
@@ -199,7 +231,7 @@ def subject_list(request):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['PATCH'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def subject_detail(request, pk):
     if request.user.role != 'ADMIN':
@@ -209,11 +241,15 @@ def subject_detail(request, pk):
     except Subject.DoesNotExist:
         return Response(status=status.HTTP_404_NOT_FOUND)
     
-    serializer = SubjectSerializer(subject, data=request.data, partial=True)
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    if request.method == 'PATCH':
+        serializer = SubjectSerializer(subject, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    elif request.method == 'DELETE':
+        subject.delete()
+        return Response({'message': 'Subject deleted successfully'}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
