@@ -25,6 +25,16 @@ class Batch(models.Model):
             duration = self.end_year - self.start_year
             if duration < 2 or duration > 6:
                 raise ValidationError({'end_year': 'Course duration must be between 2 years to 6 years only.'})
+        if self.degree_program_id and self.start_year and self.end_year:
+            existing = Batch.objects.filter(
+                degree_program_id=self.degree_program_id,
+                start_year=self.start_year,
+                end_year=self.end_year
+            )
+            if self.pk:
+                existing = existing.exclude(pk=self.pk)
+            if existing.exists():
+                raise ValidationError({'batch': f"A batch for this course with duration {self.start_year}-{self.end_year} already exists."})
 
     def __str__(self):
         return f"{self.degree_program.code} - {self.name}"
@@ -36,6 +46,25 @@ class Student(models.Model):
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='students')
     is_active = models.BooleanField(default=True)
     
+    def clean(self):
+        super().clean()
+        import re
+        from django.core.exceptions import ValidationError
+        if self.student_name:
+            name = self.student_name.strip()
+            if len(name) < 2:
+                raise ValidationError({'student_name': 'Student name must be at least 2 characters long.'})
+            if not re.match(r"^[A-Za-z\s.']+$", name):
+                raise ValidationError({'student_name': 'Student name must contain only letters, spaces, and dots/apostrophes.'})
+        if self.roll_number:
+            roll = self.roll_number.strip().upper()
+            if not re.match(r"^[A-Za-z]{2,4}-(?:2K\d{2}|20\d{2})-\d{1,4}$", roll):
+                raise ValidationError({'roll_number': 'Roll number must be in format like IC-2K22-107.'})
+        if self.enrollment_number:
+            enroll = self.enrollment_number.strip().upper()
+            if not re.match(r"^(?:[A-Za-z]{2,3}\d{5,8}|EN-[A-Za-z0-9-]+)$", enroll):
+                raise ValidationError({'enrollment_number': 'Enrollment number must be in format like DX2201125.'})
+
     def __str__(self):
         return self.student_name
 
