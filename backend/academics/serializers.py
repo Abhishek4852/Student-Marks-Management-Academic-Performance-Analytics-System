@@ -8,9 +8,30 @@ class DegreeProgramSerializer(serializers.ModelSerializer):
 
 class BatchSerializer(serializers.ModelSerializer):
     degree_program_code = serializers.CharField(source='degree_program.code', read_only=True)
+    degree_program_name = serializers.CharField(source='degree_program.name', read_only=True)
+
     class Meta:
         model = Batch
         fields = '__all__'
+
+    def validate(self, attrs):
+        start_year = attrs.get('start_year')
+        end_year = attrs.get('end_year')
+        degree_program = attrs.get('degree_program')
+
+        if start_year is not None and start_year < 2022:
+            raise serializers.ValidationError({"start_year": "Admin cannot create batch before 2022."})
+
+        if start_year is not None and end_year is not None:
+            duration = end_year - start_year
+            if duration < 2 or duration > 6:
+                raise serializers.ValidationError({"end_year": "Course duration must be between 2 years to 6 years only."})
+
+        # Ensure consistent batch naming format: <Course Name> <start_year>-<end_year>
+        if degree_program and start_year and end_year:
+            attrs['name'] = f"{degree_program.name} {start_year}-{end_year}"
+
+        return attrs
 
 class StudentSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source='batch.name', read_only=True)

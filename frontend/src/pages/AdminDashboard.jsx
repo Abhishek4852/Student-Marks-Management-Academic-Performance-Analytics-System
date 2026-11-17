@@ -10,8 +10,38 @@ export default function AdminDashboard() {
   const [faculties, setFaculties] = useState([]);
   
   const [selectedProgram, setSelectedProgram] = useState('');
-  const [batchName, setBatchName] = useState('');
+  const [startYear, setStartYear] = useState('');
+  const [endYear, setEndYear] = useState('');
   const [activeBatch, setActiveBatch] = useState(null);
+  const [batchError, setBatchError] = useState('');
+
+  // Starting year range: from 2022 onwards (admin cannot create batch before 2022)
+  const startYears = Array.from({ length: 14 }, (_, i) => 2022 + i);
+
+  // When start year is chosen, course duration must be between 2 and 6 years only
+  const sYearNum = parseInt(startYear, 10);
+  const validEndYears = sYearNum
+    ? [2, 3, 4, 5, 6].map(dur => ({
+        year: sYearNum + dur,
+        duration: dur
+      }))
+    : [];
+
+  const selectedProgramObj = programs.find(p => String(p.id) === String(selectedProgram));
+  const generatedBatchName = (selectedProgramObj && startYear && endYear)
+    ? `${selectedProgramObj.name} ${startYear}-${endYear}`
+    : '';
+
+  const handleStartYearChange = (year) => {
+    setStartYear(year);
+    setBatchError('');
+    if (year && endYear) {
+      const diff = parseInt(endYear, 10) - parseInt(year, 10);
+      if (diff < 2 || diff > 6) {
+        setEndYear('');
+      }
+    }
+  };
 
   useEffect(() => {
     api.get('programs/').then(res => setPrograms(res.data));
@@ -29,15 +59,58 @@ export default function AdminDashboard() {
   };
 
   const createBatch = async () => {
-    const res = await api.post('batches/', {
-      degree_program: selectedProgram,
-      name: batchName,
-      start_year: 2022,
-      end_year: 2026
-    });
-    setBatches([...batches, res.data]);
-    setActiveBatch(res.data);
-    alert('Batch created!');
+    setBatchError('');
+    if (!selectedProgram) {
+      setBatchError('Please select a course / degree program.');
+      return;
+    }
+    if (!startYear) {
+      setBatchError('Please select a starting year.');
+      return;
+    }
+    if (!endYear) {
+      setBatchError('Please select an ending year.');
+      return;
+    }
+
+    const sYear = parseInt(startYear, 10);
+    const eYear = parseInt(endYear, 10);
+
+    if (sYear < 2022) {
+      setBatchError('Admin cannot create a batch before 2022.');
+      return;
+    }
+
+    const duration = eYear - sYear;
+    if (duration < 2 || duration > 6) {
+      setBatchError('Course duration must be between 2 and 6 years only.');
+      return;
+    }
+
+    const finalBatchName = `${selectedProgramObj.name} ${sYear}-${eYear}`;
+
+    try {
+      const res = await api.post('batches/', {
+        degree_program: selectedProgram,
+        name: finalBatchName,
+        start_year: sYear,
+        end_year: eYear
+      });
+      setBatches([...batches, res.data]);
+      setActiveBatch(res.data);
+      setStartYear('');
+      setEndYear('');
+      setBatchError('');
+      alert(`Batch "${res.data.name}" created successfully!`);
+    } catch (err) {
+      const errorMsg = err.response?.data
+        ? (typeof err.response.data === 'string'
+            ? err.response.data
+            : Object.entries(err.response.data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | '))
+        : 'Failed to create batch.';
+      setBatchError(errorMsg);
+      alert(errorMsg);
+    }
   };
 
   const pendingFaculties = faculties.filter(f => !f.is_approved && f.role === 'FACULTY');
@@ -66,15 +139,90 @@ export default function AdminDashboard() {
       )}
       
       <div className="bg-white p-6 rounded shadow mb-8 border-t-4 border-blue-500">
-        <h2 className="text-xl font-bold mb-4">1. Select Degree Program & Create Batch</h2>
-        <div className="flex flex-wrap gap-4 items-center">
-          <select className="border border-gray-300 p-2 rounded" value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)}>
-            <option value="">-- Select Program --</option>
-            {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <input className="border border-gray-300 p-2 rounded" placeholder="Batch Name (e.g. 2022-2026)" value={batchName} onChange={e => setBatchName(e.target.value)} />
-          <button onClick={createBatch} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Create Batch</button>
+        <h2 className="text-xl font-bold mb-2 text-gray-800">1. Select Degree Program & Create Batch</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          Select course, starting year (2022 onwards), and ending year (duration between 2 to 6 years). Resulting batch name is automatically generated.
+        </p>
+
+        <div className="flex flex-wrap gap-4 items-end">
+          {/* Degree Program / Course */}
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-600 mb-1">Degree Program / Course</label>
+            <select
+              className="border border-gray-300 p-2 rounded bg-white min-w-[200px]"
+              value={selectedProgram}
+              onChange={e => {
+                setSelectedProgram(e.target.value);
+                setBatchError('');
+              }}
+            >
+              <option value="">-- Select Course --</option>
+              {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+
+          {/* Starting Year */}
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-600 mb-1">Starting Year (≥ 2022)</label>
+            <select
+              className="border border-gray-300 p-2 rounded bg-white min-w-[150px] disabled:bg-gray-100 disabled:cursor-not-allowed"
+              value={startYear}
+              disabled={!selectedProgram}
+              onChange={e => handleStartYearChange(e.target.value)}
+            >
+              <option value="">{selectedProgram ? '-- Start Year --' : '-- Select Course First --'}</option>
+              {startYears.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Ending Year */}
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-600 mb-1">Ending Year (2 to 6 Years)</label>
+            <select
+              className="border border-gray-300 p-2 rounded bg-white min-w-[180px] disabled:bg-gray-100 disabled:cursor-not-allowed"
+              value={endYear}
+              disabled={!startYear}
+              onChange={e => {
+                setEndYear(e.target.value);
+                setBatchError('');
+              }}
+            >
+              <option value="">{startYear ? '-- End Year --' : '-- Select Start Year First --'}</option>
+              {validEndYears.map(({ year, duration }) => (
+                <option key={year} value={year}>{year} ({duration} Years)</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Resulting Batch Name */}
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-600 mb-1">Resulting Batch Name</label>
+            <input
+              type="text"
+              readOnly
+              className="border border-gray-300 p-2 rounded bg-gray-100 text-gray-700 font-semibold min-w-[240px] cursor-not-allowed"
+              placeholder="e.g. BCA+MCA 2022-2027"
+              value={generatedBatchName}
+            />
+          </div>
+
+          {/* Create Batch Button */}
+          <button
+            onClick={createBatch}
+            disabled={!selectedProgram || !startYear || !endYear}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium px-5 py-2 rounded h-[42px] transition shadow-sm"
+          >
+            Create Batch
+          </button>
         </div>
+
+        {batchError && (
+          <div className="mt-3 text-sm text-red-600 font-medium bg-red-50 p-2 rounded border border-red-200">
+            ⚠️ {batchError}
+          </div>
+        )}
         
         <div className="mt-6">
           <h3 className="font-bold text-gray-700">Existing Batches</h3>
