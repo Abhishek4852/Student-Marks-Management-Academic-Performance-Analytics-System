@@ -16,6 +16,16 @@ class Batch(models.Model):
     end_year = models.IntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+        if self.start_year is not None and self.start_year < 2022:
+            raise ValidationError({'start_year': 'Admin cannot create batch before 2022.'})
+        if self.start_year is not None and self.end_year is not None:
+            duration = self.end_year - self.start_year
+            if duration < 2 or duration > 6:
+                raise ValidationError({'end_year': 'Course duration must be between 2 years to 6 years only.'})
+
     def __str__(self):
         return f"{self.degree_program.code} - {self.name}"
 

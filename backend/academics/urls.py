@@ -19,7 +19,7 @@ urlpatterns = [
     path('faculty/my-subjects/', views.faculty_subjects, name='faculty_subjects'),
     path('subjects/<int:pk>/students/', views.subject_students, name='subject_students'),
     path('subjects/<int:pk>/marks/', views.subject_marks, name='subject_marks'),
-    path('semesters/<int:pk>/analytics/', views.subject_analytics, name='semester_analytics'),
+    path('subjects/<int:pk>/analytics/', views.subject_analytics, name='subject_analytics'),
     path('semesters/<int:pk>/ranking/', views.semester_ranking, name='semester_ranking'),
     
     path('dashboard/', views.dashboard_data, name='dashboard_data'),
