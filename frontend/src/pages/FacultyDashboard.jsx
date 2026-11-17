@@ -44,11 +44,35 @@ export default function FacultyDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="col-span-1 bg-white p-4 shadow rounded h-fit">
           <h2 className="font-bold text-xl mb-4 border-b pb-2">My Subjects</h2>
-          <ul>
+          <ul className="space-y-2">
             {subjects.map(s => (
-              <li key={s.id} className="mb-2">
-                <button onClick={() => loadMarks(s)} className={`w-full text-left px-3 py-2 rounded ${activeSubject?.id === s.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}>
-                  {s.subject_code} - {s.name} <br/><span className="text-xs text-gray-500">{s.subject_type}</span>
+              <li key={s.id}>
+                <button
+                  onClick={() => loadMarks(s)}
+                  className={`w-full text-left p-3 rounded-lg border transition ${
+                    activeSubject?.id === s.id
+                      ? 'bg-blue-50 border-blue-500 shadow-sm'
+                      : 'border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className={`font-semibold text-sm ${activeSubject?.id === s.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {s.subject_code} - {s.name}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1 text-xs">
+                    {s.batch_name && (
+                      <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded font-medium">
+                        Batch: {s.batch_name}
+                      </span>
+                    )}
+                    {s.semester_name && (
+                      <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                        {s.semester_name}
+                      </span>
+                    )}
+                    <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                      {s.subject_type}
+                    </span>
+                  </div>
                 </button>
               </li>
             ))}
@@ -59,8 +83,20 @@ export default function FacultyDashboard() {
         <div className="col-span-3 bg-white p-6 shadow rounded">
           {activeSubject ? (
             <div>
-              <div className="flex justify-between items-center mb-4 border-b pb-4">
-                <h2 className="text-2xl font-bold">Managing: {activeSubject.name}</h2>
+              <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-4 border-b pb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">Managing: {activeSubject.name}</h2>
+                  <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-600">
+                    <span><strong className="text-gray-700">Code:</strong> {activeSubject.subject_code}</span>
+                    {activeSubject.batch_name && (
+                      <span><strong className="text-gray-700">Batch:</strong> {activeSubject.batch_name}</span>
+                    )}
+                    {activeSubject.semester_name && (
+                      <span><strong className="text-gray-700">Semester:</strong> {activeSubject.semester_name}</span>
+                    )}
+                    <span><strong className="text-gray-700">Type:</strong> {activeSubject.subject_type}</span>
+                  </div>
+                </div>
                 <div className="flex gap-2">
                   <button onClick={() => setActiveTab('marks')} className={`px-4 py-2 font-bold rounded shadow-sm transition ${activeTab==='marks'?'bg-blue-600 text-white':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Marks Entry</button>
                   <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 font-bold rounded shadow-sm transition ${activeTab==='analytics'?'bg-blue-600 text-white':'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>View Analytics</button>

@@ -46,8 +46,13 @@ class SemesterSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SubjectSerializer(serializers.ModelSerializer):
-    semester_name = serializers.CharField(source='semester.name', read_only=True)
-    assigned_faculty_name = serializers.CharField(source='assigned_faculty.username', read_only=True)
+    semester_name = serializers.CharField(source='semester.name', default='', read_only=True)
+    semester_number = serializers.IntegerField(source='semester.semester_number', default=None, read_only=True)
+    batch_id = serializers.IntegerField(source='semester.batch.id', default=None, read_only=True)
+    batch_name = serializers.CharField(source='semester.batch.name', default='', read_only=True)
+    degree_program_name = serializers.CharField(source='semester.batch.degree_program.name', default='', read_only=True)
+    degree_program_code = serializers.CharField(source='semester.batch.degree_program.code', default='', read_only=True)
+    assigned_faculty_name = serializers.CharField(source='assigned_faculty.username', default='', read_only=True)
     
     class Meta:
         model = Subject

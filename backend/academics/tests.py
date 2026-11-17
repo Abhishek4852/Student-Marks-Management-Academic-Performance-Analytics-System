@@ -72,3 +72,24 @@ def test_enrollment_and_marks():
     assert mark_record.end_semester == 50
     # Check kar rahe hain ki jo marks enter NAHI hue (jaise internal_2), wo NULL (None) hain
     assert mark_record.internal_2 is None
+
+@pytest.mark.django_db
+def test_subject_serializer_includes_batch_and_semester():
+    from academics.serializers import SubjectSerializer
+    program = DegreeProgram.objects.create(name="BCE + MCA", code="BCE_MCA")
+    batch = Batch.objects.create(name="2022-2027", degree_program=program, start_year=2022, end_year=2027)
+    semester = Semester.objects.create(semester_number=9, name="Semester 9", batch=batch)
+    faculty = User.objects.create(username="test_prof", role="FACULTY")
+    subject = Subject.objects.create(
+        subject_code="CS-901",
+        name="Object Oriented Analysis & Design",
+        subject_type="THEORY",
+        semester=semester,
+        assigned_faculty=faculty
+    )
+    serializer = SubjectSerializer(subject)
+    data = serializer.data
+    assert data['batch_name'] == "2022-2027"
+    assert data['semester_name'] == "Semester 9"
+    assert data['degree_program_name'] == "BCE + MCA"
+    assert data['assigned_faculty_name'] == "test_prof"
