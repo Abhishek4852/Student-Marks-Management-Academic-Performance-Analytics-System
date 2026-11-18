@@ -36,3 +36,6 @@ All faculty members listed below have been pre-registered, assigned to their res
 To test the flow:
 1. Log in as an **Admin** to oversee the system, add more batches, or approve new faculty.
 2. Log in as any of the **Faculty** (e.g. `ramesh`) to see their assigned subjects and view/edit the populated student marks!
+
+## live url 
+https://0655-2401-4900-e023-e532-fdf8-f3d9-c08d-6bf6.ngrok-free.app/
